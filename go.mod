@@ -11,6 +11,7 @@ require (
 	github.com/matryer/is v1.4.1
 	google.golang.org/grpc v1.56.1
 	google.golang.org/protobuf v1.30.0
+	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637
 )
 
 require (
@@ -33,7 +34,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.0 // indirect
 	github.com/oklog/run v1.0.0 // indirect
-	github.com/rs/zerolog v1.29.0 // indirect
+	github.com/rs/zerolog v1.29.1 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	go.uber.org/goleak v1.2.1 // indirect
@@ -47,5 +48,4 @@ require (
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
-	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637 // indirect
 )

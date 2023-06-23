@@ -17,12 +17,14 @@ package grpcclient
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/conduitio-labs/conduit-connector-grpc-client/fromproto"
 	pb "github.com/conduitio-labs/conduit-connector-grpc-client/proto/v1"
@@ -33,6 +35,27 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+var records = []sdk.Record{
+	{
+		Position:  sdk.Position("foo"),
+		Operation: sdk.OperationSnapshot,
+		Key:       sdk.StructuredData{"id1": "6"},
+		Payload: sdk.Change{
+			After: sdk.StructuredData{
+				"foo": "bar",
+			},
+		},
+	},
+	{
+		Position:  sdk.Position("foobar"),
+		Operation: sdk.OperationSnapshot,
+		Key:       sdk.RawData("bar"),
+		Payload: sdk.Change{
+			After: sdk.RawData("baz"),
+		},
+	},
+}
+
 func TestTeardown_NoOpen(t *testing.T) {
 	is := is.New(t)
 	con := NewDestination()
@@ -42,27 +65,107 @@ func TestTeardown_NoOpen(t *testing.T) {
 
 func TestWrite_Success(t *testing.T) {
 	is := is.New(t)
-	records := []sdk.Record{
-		{
-			Position:  sdk.Position("foo"),
-			Operation: sdk.OperationSnapshot,
-			Key:       sdk.StructuredData{"id1": "6"},
-			Payload: sdk.Change{
-				After: sdk.StructuredData{
-					"foo": "bar",
-				},
-			},
-		},
-		{
-			Position:  sdk.Position("foobar"),
-			Operation: sdk.OperationSnapshot,
-			Key:       sdk.RawData("bar"),
-			Payload: sdk.Change{
-				After: sdk.RawData("baz"),
-			},
-		},
-	}
 	dest, ctx := prepareServerAndDestination(t, records)
+	n, err := dest.Write(ctx, records)
+	is.NoErr(err)
+	is.Equal(n, 2)
+}
+
+func TestBackoffRetry_MaxDowntime(t *testing.T) {
+	is := is.New(t)
+	// use in-memory connection
+	lis := bufconn.Listen(1024 * 1024)
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return lis.DialContext(ctx)
+	}
+
+	// prepare server
+	srv := grpc.NewServer()
+
+	// start gRPC server
+	go func() {
+		err := srv.Serve(lis)
+		is.NoErr(err)
+	}()
+	defer srv.Stop()
+
+	// prepare destination (client)
+	ctx := context.Background()
+	dest := NewDestinationWithDialer(dialer)
+	err := dest.Configure(ctx, map[string]string{
+		"url":            "bufnet",
+		"rateLimit":      "0",
+		"maxDowntime":    "500ms",
+		"reconnectDelay": "200ms",
+	})
+	is.NoErr(err)
+	// Open will start monitoring connection status
+	err = dest.Open(ctx)
+	is.NoErr(err)
+	defer func() {
+		err := dest.Teardown(ctx)
+		is.NoErr(err)
+	}()
+	// connection will be lost
+	srv.Stop()
+	// maxDowntime is 0.5 second, sleep for 1
+	time.Sleep(1 * time.Second)
+	// attempt to write a record, to get the connection error
+	n, err := dest.Write(ctx, []sdk.Record{
+		{Position: sdk.Position("foo")},
+	})
+	is.True(errors.Is(err, errDowntimeReached))
+	is.Equal(n, 0)
+}
+
+func TestBackoffRetry_Reconnect(t *testing.T) {
+	is := is.New(t)
+	var lisMutex sync.Mutex
+	// use in-memory connection
+	lis := bufconn.Listen(1024 * 1024)
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		// avoiding a race condition for the listener
+		lisMutex.Lock()
+		defer lisMutex.Unlock()
+		return lis.DialContext(ctx)
+	}
+
+	// prepare and start server
+	srv := grpc.NewServer()
+	go func() {
+		err := srv.Serve(lis)
+		is.NoErr(err)
+	}()
+
+	// prepare destination (client)
+	ctx := context.Background()
+	dest := NewDestinationWithDialer(dialer)
+	err := dest.Configure(ctx, map[string]string{
+		"url":            "bufnet",
+		"rateLimit":      "0",
+		"maxDowntime":    "5s",
+		"reconnectDelay": "200ms",
+	})
+	is.NoErr(err)
+	// Open will start monitoring connection status
+	err = dest.Open(ctx)
+	is.NoErr(err)
+	defer func() {
+		err := dest.Teardown(ctx)
+		is.NoErr(err)
+	}()
+	// stop server, connection will be lost
+	srv.Stop()
+	// reconnectDelay is 200ms, dest will try to reconnect two times
+	time.Sleep(500 * time.Millisecond)
+	// start server
+	lisMutex.Lock()
+	lis = bufconn.Listen(1024 * 1024)
+	lisMutex.Unlock()
+	startTestServer(t, lis, records)
+	// reconnection will succeed
+	time.Sleep(500 * time.Millisecond)
+	// write records normally
 	n, err := dest.Write(ctx, records)
 	is.NoErr(err)
 	is.Equal(n, 2)
@@ -82,7 +185,12 @@ func prepareServerAndDestination(t *testing.T, expected []sdk.Record) (sdk.Desti
 	// prepare destination (client)
 	ctx := context.Background()
 	dest := NewDestinationWithDialer(dialer)
-	err := dest.Configure(ctx, map[string]string{"url": "bufnet", "rateLimit": "10000"})
+	err := dest.Configure(ctx, map[string]string{
+		"url":            "bufnet",
+		"rateLimit":      "0",
+		"maxDowntime":    "1m",
+		"reconnectDelay": "10s",
+	})
 	is.NoErr(err)
 	err = dest.Open(ctx)
 	is.NoErr(err)
@@ -146,7 +254,7 @@ func startTestServer(t *testing.T, lis net.Listener, expected []sdk.Record) {
 		}
 	}()
 	t.Cleanup(func() {
-		srv.GracefulStop()
+		srv.Stop()
 		wg.Wait()
 	})
 }
