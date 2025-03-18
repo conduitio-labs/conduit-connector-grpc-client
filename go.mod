@@ -10,7 +10,7 @@ require (
 	github.com/conduitio/bwlimit/bwgrpc v0.1.0
 	github.com/conduitio/conduit-commons v0.5.1
 	github.com/conduitio/conduit-connector-sdk v0.12.0
-	github.com/golangci/golangci-lint v1.64.7
+	github.com/golangci/golangci-lint v1.64.8
 	github.com/matryer/is v1.4.1
 	go.uber.org/mock v0.5.0
 	go.uber.org/multierr v1.11.0
