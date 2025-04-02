@@ -2,7 +2,7 @@ module github.com/conduitio-labs/conduit-connector-grpc-client
 
 go 1.23.2
 
-toolchain go1.23.3
+toolchain go1.24.1
 
 require (
 	github.com/bufbuild/buf v1.50.1
@@ -14,7 +14,7 @@ require (
 	github.com/matryer/is v1.4.1
 	go.uber.org/mock v0.5.0
 	go.uber.org/multierr v1.11.0
-	google.golang.org/grpc v1.71.0
+	google.golang.org/grpc v1.71.1
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637
 )
