@@ -31,6 +31,7 @@ import (
 	pb "github.com/conduitio-labs/conduit-connector-grpc-client/proto/v1"
 	"github.com/conduitio/conduit-commons/opencdc"
 	sdk "github.com/conduitio/conduit-connector-sdk"
+	"github.com/google/go-cmp/cmp"
 	"github.com/matryer/is"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
@@ -123,7 +124,7 @@ func TestBackoffRetry_MaxDowntime(t *testing.T) {
 	ctx := context.Background()
 	dest := NewDestinationWithDialer(dialer)
 	err := dest.Configure(ctx, map[string]string{
-		"url":            "passthrough://bufnet",
+		"url":            "localhost",
 		"rateLimit":      "0",
 		"maxDowntime":    "500ms",
 		"reconnectDelay": "200ms",
@@ -172,7 +173,7 @@ func TestBackoffRetry_Reconnect(t *testing.T) {
 	ctx := context.Background()
 	dest := NewDestinationWithDialer(dialer)
 	err := dest.Configure(ctx, map[string]string{
-		"url":            "passthrough://bufnet",
+		"url":            "localhost",
 		"rateLimit":      "0",
 		"maxDowntime":    "5s",
 		"reconnectDelay": "200ms",
@@ -239,7 +240,7 @@ func prepareServerAndDestination(t *testing.T, expected []opencdc.Record) (sdk.D
 	return dest, ctx
 }
 
-func startTestServer(t *testing.T, lis net.Listener, enableMTLS bool, _ []opencdc.Record) {
+func startTestServer(t *testing.T, lis net.Listener, enableMTLS bool, expected []opencdc.Record) {
 	is := is.New(t)
 	ctrl := gomock.NewController(t)
 	serverOptions := make([]grpc.ServerOption, 0, 1)
@@ -268,7 +269,7 @@ func startTestServer(t *testing.T, lis net.Listener, enableMTLS bool, _ []opencd
 		Stream(gomock.Any()).
 		DoAndReturn(
 			func(stream pb.SourceService_StreamServer) error {
-				for {
+				for i := 0; ; i++ {
 					// read from the stream to simulate receiving data from the client
 					rec, err := stream.Recv()
 					if err == io.EOF {
@@ -278,10 +279,18 @@ func startTestServer(t *testing.T, lis net.Listener, enableMTLS bool, _ []opencd
 						return err
 					}
 					// convert the proto record to opencdc.Record to compare with expected records
-					_, err = fromproto.Record(rec)
+					got, err := fromproto.Record(rec)
 					if err != nil {
 						return err
 					}
+
+					// to compare the received record with the expected record
+					// we need to convert the position to the original format
+					got.Position = ToRecordPosition(got.Position).Original
+					if diff := cmp.Diff(expected[i].Map(), got.Map()); diff != "" {
+						t.Errorf("(-want, +got)\n%s", diff)
+					}
+
 					// Write to the stream to simulate sending data to the client
 					resp := &pb.Ack{AckPosition: rec.Position}
 					if err := stream.Send(resp); err != nil {

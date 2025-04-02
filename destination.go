@@ -65,11 +65,11 @@ type DestConfig struct {
 
 // NewDestinationWithDialer for testing purposes.
 func NewDestinationWithDialer(dialer func(ctx context.Context, _ string) (net.Conn, error)) sdk.Destination {
-	return sdk.DestinationWithMiddleware(&Destination{dialer: dialer})
+	return sdk.DestinationWithMiddleware(&Destination{dialer: dialer}, sdk.DefaultDestinationMiddleware()...)
 }
 
 func NewDestination() sdk.Destination {
-	return sdk.DestinationWithMiddleware(&Destination{}, sdk.DefaultDestinationMiddleware()...)
+	return NewDestinationWithDialer(nil)
 }
 
 func (d *Destination) Parameters() config.Parameters {
