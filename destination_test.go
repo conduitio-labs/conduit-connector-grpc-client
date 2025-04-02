@@ -241,25 +241,10 @@ func prepareServerAndDestination(t *testing.T, expected []opencdc.Record) (sdk.D
 }
 
 func startTestServer(t *testing.T, lis net.Listener, enableMTLS bool, expected []opencdc.Record) {
-	is := is.New(t)
 	ctrl := gomock.NewController(t)
-	serverOptions := make([]grpc.ServerOption, 0, 1)
+	var serverOptions []grpc.ServerOption
 	if enableMTLS {
-		serverCert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
-		is.NoErr(err)
-		caCert, err := os.ReadFile(caCertPath)
-		is.NoErr(err)
-		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
-
-		// create TLS credentials with mTLS configuration
-		creds := credentials.NewTLS(&tls.Config{
-			Certificates: []tls.Certificate{serverCert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    caCertPool,
-			MinVersion:   tls.VersionTLS13,
-		})
-		serverOptions = append(serverOptions, grpc.Creds(creds))
+		serverOptions = mtlsServerOptions(t, serverOptions)
 	}
 	srv := grpc.NewServer(serverOptions...)
 
@@ -314,4 +299,24 @@ func startTestServer(t *testing.T, lis net.Listener, enableMTLS bool, expected [
 		srv.Stop()
 		wg.Wait()
 	})
+}
+
+func mtlsServerOptions(t *testing.T, options []grpc.ServerOption) []grpc.ServerOption {
+	is := is.New(t)
+	serverCert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
+	is.NoErr(err)
+	caCert, err := os.ReadFile(caCertPath)
+	is.NoErr(err)
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	// create TLS credentials with mTLS configuration
+	creds := credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caCertPool,
+		MinVersion:   tls.VersionTLS13,
+	})
+	options = append(options, grpc.Creds(creds))
+	return options
 }
